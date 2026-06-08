@@ -53,21 +53,17 @@ fn verify_event_hash(
 
 /// Convert a hex string to bytes without using external crates
 fn hex_string_to_bytes(hex: &str) -> Result<Vec<u8>, PolicyError> {
-    // Ensure even number of characters
-    if hex.is_empty() || hex.len() % 2 != 0 {
+    // Ensure even number of characters and ASCII-only
+    if hex.is_empty() || hex.len() % 2 != 0 || !hex.is_ascii() {
         return Err(PolicyError::InvalidParameter);
     }
 
     let mut bytes = Vec::with_capacity(hex.len() / 2);
 
-    // Process two hex digits at a time
-    for i in (0..hex.len()).step_by(2) {
-        if i + 2 > hex.len() {
-            break;
-        }
-
-        // Get the hex byte as a string slice
-        let byte_str = &hex[i..i + 2];
+    // Process two hex digits at a time using bytes to avoid char-boundary issues
+    for chunk in hex.as_bytes().chunks_exact(2) {
+        // Safety: we verified is_ascii() above so each byte is a valid single-char str
+        let byte_str = core::str::from_utf8(chunk).map_err(|_| PolicyError::InvalidParameter)?;
 
         // Convert to numeric value
         let byte = u8::from_str_radix(byte_str, 16).map_err(|_| PolicyError::InvalidParameter)?;

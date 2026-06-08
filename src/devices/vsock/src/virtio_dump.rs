@@ -102,28 +102,25 @@ impl BarAddress {
 
     pub fn common_addr(&mut self) -> Option<usize> {
         let mut cap_next = self.read::<u8>(PCI_CAP_POINTER);
+        let mut iterations = 0u16;
+        const MAX_CAP_ITERATIONS: u16 = 256;
 
-        while cap_next < CAP_NEXT_MAX && cap_next > 0 {
+        while cap_next < CAP_NEXT_MAX && cap_next > 0 && iterations < MAX_CAP_ITERATIONS {
+            iterations += 1;
             // vendor specific capability
             if self.read::<u8>(cap_next.into()) == VIRTIO_CAPABILITIES_SPECIFIC {
-                // These offsets are into the following structure:
-                // struct virtio_pci_cap {
-                //         u8 cap_vndr;    /* Generic PCI field: PCI_CAP_ID_VNDR */
-                //         u8 cap_next;    /* Generic PCI field: next ptr. */
-                //         u8 cap_len;     /* Generic PCI field: capability length */
-                //         u8 cfg_type;    /* Identifies the structure. */
-                //         u8 bar;         /* Where to find it. */
-                //         u8 padding[3];  /* Pad to full dword. */
-                //         le32 offset;    /* Offset within bar. */
-                //         le32 length;    /* Length of the structure, in bytes. */
-                // };
                 let cfg_type = self.read::<u8>((cap_next + VIRTIO_CFG_TYPE_OFFSET).into());
                 #[allow(clippy::disallowed_names)]
                 let bar = self.read::<u8>((cap_next + VIRTIO_BAR_OFFSET).into());
                 let offset = self.read::<u32>((cap_next + VIRTIO_CAP_OFFSET).into());
 
                 if cfg_type == VIRTIO_COMMON_CONFIGURATION {
-                    return Some((self.bars[usize::from(bar)] + u64::from(offset)) as usize);
+                    if (bar as usize) >= self.bars.len() {
+                        return None;
+                    }
+                    return Some(
+                        (self.bars[usize::from(bar)].checked_add(u64::from(offset))?) as usize,
+                    );
                 }
             }
             cap_next = self.read::<u8>((cap_next + 1).into());

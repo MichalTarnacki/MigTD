@@ -386,12 +386,12 @@ impl VsockStream {
                 if packet.data_len() > 0 {
                     let mut recv = vsock_transport_dequeue(self, DEFAULT_TIMEOUT).await?;
 
-                    self.rx_cnt += packet.data_len();
                     if packet.data_len() as usize <= recv.len() {
                         recv.truncate(packet.data_len() as usize);
                     } else {
                         return Err(VsockError::Illegal);
                     }
+                    self.rx_cnt = self.rx_cnt.wrapping_add(packet.data_len());
 
                     // Send credit update if the free space is less than a max packet size
                     if self.free_space() < MAX_VSOCK_PKT_DATA_LEN as u32 {

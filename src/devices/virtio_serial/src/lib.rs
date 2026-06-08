@@ -502,10 +502,12 @@ impl VirtioSerial {
                     let control_msg =
                         unsafe { core::slice::from_raw_parts(vq_buf.addr as *const u8, safe_len) };
 
-                    self.handle_control_msg(control_msg)?;
+                    let result = self.handle_control_msg(control_msg);
 
                     self.free_dma_memory(vq_buf.addr)
                         .ok_or(VirtioSerialError::OutOfResource)?;
+
+                    result?;
                 }
             }
         }
@@ -594,6 +596,9 @@ impl VirtioSerial {
         if data.is_empty() || data.len() > u32::MAX as usize {
             return Err(VirtioSerialError::InvalidParameter);
         }
+        if port_id >= MAX_PORT_SUPPORTED as u32 {
+            return Err(VirtioSerialError::InvalidParameter);
+        }
 
         let mut g2h = Vec::new();
         let dma = self
@@ -628,7 +633,7 @@ impl VirtioSerial {
         if port_id == 0 {
             0
         } else {
-            2 + port_id as u16 * 2
+            2u16.saturating_add((port_id as u16).saturating_mul(2))
         }
     }
 

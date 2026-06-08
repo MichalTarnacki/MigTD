@@ -102,6 +102,9 @@ pub fn attest_init_heap() -> Option<usize> {
     unsafe {
         let heap_base =
             alloc::alloc::alloc_zeroed(Layout::from_size_align(ATTEST_HEAP_SIZE, 0x1000).ok()?);
+        if heap_base.is_null() {
+            return None;
+        }
 
         init_heap(heap_base as *mut c_void, ATTEST_HEAP_SIZE as u32);
     }
@@ -124,10 +127,18 @@ pub fn get_quote(td_report: &[u8]) -> Result<Vec<u8>, Error> {
     {
         let mut quote = vec![0u8; TD_QUOTE_SIZE];
         let mut quote_size = TD_QUOTE_SIZE as u32;
+        if td_report.len() != TD_REPORT_SIZE {
+            log::error!(
+                "get_quote: td_report.len()={} != TD_REPORT_SIZE={}\n",
+                td_report.len(),
+                TD_REPORT_SIZE
+            );
+            return Err(Error::GetQuote);
+        }
         unsafe {
             let result = get_quote_inner(
                 td_report.as_ptr() as *const c_void,
-                TD_REPORT_SIZE as u32,
+                td_report.len() as u32,
                 quote.as_mut_ptr() as *mut c_void,
                 &mut quote_size as *mut u32,
             );
@@ -150,7 +161,10 @@ pub fn verify_quote(quote: &[u8]) -> Result<Vec<u8>, Error> {
 
     // Safety:
     // ROOT_CA must have been set and checked at this moment.
-    let public_key = ROOT_CA_PUBLIC_KEY.get().unwrap().as_slice();
+    let public_key = ROOT_CA_PUBLIC_KEY
+        .get()
+        .ok_or(Error::InvalidRootCa)?
+        .as_slice();
 
     unsafe {
         let result = verify_quote_integrity(
@@ -190,7 +204,10 @@ pub fn verify_quote_with_collaterals(
 
     // Safety:
     // ROOT_CA must have been set and checked at this moment.
-    let public_key = ROOT_CA_PUBLIC_KEY.get().unwrap().as_slice();
+    let public_key = ROOT_CA_PUBLIC_KEY
+        .get()
+        .ok_or(Error::InvalidRootCa)?
+        .as_slice();
 
     let qve_collateral: QveCollateral = (&collateral).into();
     unsafe {
@@ -210,6 +227,15 @@ pub fn verify_quote_with_collaterals(
             );
             return Err(Error::VerifyQuote);
         }
+    }
+
+    if report_verify_size as usize != TD_VERIFIED_REPORT_SIZE {
+        log::error!(
+            "verify_quote_with_collaterals: Invalid report size: expected {}, got {}\n",
+            TD_VERIFIED_REPORT_SIZE,
+            report_verify_size
+        );
+        return Err(Error::InvalidOutput);
     }
 
     mask_verified_report_values(&mut td_report_verify[..report_verify_size as usize]);
