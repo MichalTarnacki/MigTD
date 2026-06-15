@@ -38,6 +38,39 @@ pub fn init_mmio() {
     *MMIO64.lock() = MMIO64_START;
 }
 
+/// Device MMIO is never allowed to live below 1 MiB. That range is reserved
+/// for legacy low memory and is not a valid MMIO aperture.
+pub const MMIO_LOW_LIMIT: u64 = 0x10_0000;
+
+/// Returns `true` if `[base, base + length)` hits RAM or the low 1 MiB.
+/// Defense in depth for host-controlled BARs.
+pub fn region_overlaps_private_dram(base: u64, length: u64) -> bool {
+    let end = match base.checked_add(length) {
+        Some(end) => end,
+        None => return true,
+    };
+
+    if base < MMIO_LOW_LIMIT {
+        return true;
+    }
+
+    let memory_map = MEMORY_MAP.lock();
+    for region in memory_map.iter() {
+        let region_end = match region.addr.checked_add(region.size) {
+            Some(region_end) => region_end,
+            None => return true,
+        };
+
+        // Overlap test for the half-open intervals [base, end) and
+        // [region.addr, region_end).
+        if base < region_end && end > region.addr {
+            return true;
+        }
+    }
+
+    false
+}
+
 #[cfg(feature = "fuzz")]
 pub fn alloc_mmio32(size: u32) -> Result<u32> {
     let cur = *MMIO_OFFSET.lock();
