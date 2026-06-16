@@ -293,6 +293,15 @@ impl ServerCertVerifier for Verifier {
         cert: &CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> core::result::Result<HandshakeSignatureValid, rustls::Error> {
+        // Pin the CertificateVerify signature scheme to ECDSA P-384/SHA-384,
+        // consistent with the cipher suite and key-exchange group pinned in
+        // `crypto_provider()`. Reject any other scheme so the handshake
+        // transcript can only be bound with the expected algorithm.
+        if dss.scheme != rustls::SignatureScheme::ECDSA_NISTP384_SHA384 {
+            return Err(rustls::Error::PeerIncompatible(
+                rustls::PeerIncompatible::NoSignatureSchemesInCommon,
+            ));
+        }
         verify_tls13_signature(
             message,
             cert,
@@ -316,9 +325,7 @@ impl ServerCertVerifier for Verifier {
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        default_provider()
-            .signature_verification_algorithms
-            .supported_schemes()
+        vec![rustls::SignatureScheme::ECDSA_NISTP384_SHA384]
     }
 }
 
@@ -347,6 +354,15 @@ impl ClientCertVerifier for Verifier {
         cert: &CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> core::result::Result<HandshakeSignatureValid, rustls::Error> {
+        // Pin the CertificateVerify signature scheme to ECDSA P-384/SHA-384,
+        // consistent with the cipher suite and key-exchange group pinned in
+        // `crypto_provider()`. Reject any other scheme so the handshake
+        // transcript can only be bound with the expected algorithm.
+        if dss.scheme != rustls::SignatureScheme::ECDSA_NISTP384_SHA384 {
+            return Err(rustls::Error::PeerIncompatible(
+                rustls::PeerIncompatible::NoSignatureSchemesInCommon,
+            ));
+        }
         verify_tls13_signature(
             message,
             cert,
@@ -370,9 +386,7 @@ impl ClientCertVerifier for Verifier {
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        default_provider()
-            .signature_verification_algorithms
-            .supported_schemes()
+        vec![rustls::SignatureScheme::ECDSA_NISTP384_SHA384]
     }
 
     fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
