@@ -94,11 +94,14 @@ lazy_static! {
     pub static ref REQUESTS: Mutex<BTreeSet<u64>> = Mutex::new(BTreeSet::new());
 }
 
+#[repr(C)]
 #[derive(Default)]
 pub struct ExchangeInformation {
+    pub key: MigrationSessionKey,
     pub min_ver: u16,
     pub max_ver: u16,
-    pub key: MigrationSessionKey,
+    // Explicit zeroed padding field.
+    pub reserved: [u8; 4],
 }
 
 #[cfg(not(feature = "spdm_attestation"))]

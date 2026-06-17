@@ -157,6 +157,21 @@ pub async fn spdm_responder_transfer_msk(
 
     spdm_responder_ex.peer_data = peer_data;
 
+    // Zeroize the responder key buffer on every return path.
+    let result = spdm_responder_transfer_msk_inner(spdm_responder_ex, mig_info).await;
+    spdm_responder_ex
+        .responder_context
+        .common
+        .app_context_data_buffer
+        .zeroize();
+
+    result
+}
+
+async fn spdm_responder_transfer_msk_inner(
+    spdm_responder_ex: &mut ResponderContextEx<'_>,
+    mig_info: &MigtdMigrationInformation,
+) -> Result<(), SpdmStatus> {
     let spdm_responder = &mut spdm_responder_ex.responder_context;
     let mut writer = Writer::init(&mut spdm_responder.common.app_context_data_buffer);
 
@@ -168,10 +183,7 @@ pub async fn spdm_responder_transfer_msk(
         .encode(&mut writer)
         .map_err(|_| SPDM_STATUS_BUFFER_FULL)?;
 
-    Box::pin(rsp_handle_message(spdm_responder)).await?;
-    spdm_responder.common.app_context_data_buffer.zeroize();
-
-    Ok(())
+    Box::pin(rsp_handle_message(spdm_responder)).await
 }
 
 pub async fn rsp_handle_message(spdm_responder: &mut ResponderContext) -> Result<(), SpdmStatus> {
@@ -861,6 +873,7 @@ pub fn handle_exchange_mig_info_req(
     let remote_information = ExchangeInformation {
         min_ver: min_export_version,
         max_ver: max_export_version,
+        reserved: [0u8; 4],
         key: MigrationSessionKey {
             fields: <[u64; 4]>::read(reader).ok_or(SPDM_STATUS_INVALID_MSG_SIZE)?,
         },
