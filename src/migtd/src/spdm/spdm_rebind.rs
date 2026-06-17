@@ -83,6 +83,20 @@ pub async fn spdm_responder_rebind_new<'a>(
     spdm_responder_ex.peer_data = peer_data;
     spdm_responder_ex.info = ResponderContextExInfo::RebindInformation(rebind_info);
 
+    // Zeroize the responder key buffer on every return path.
+    let result = spdm_responder_rebind_new_inner(spdm_responder_ex).await;
+    spdm_responder_ex
+        .responder_context
+        .common
+        .app_context_data_buffer
+        .zeroize();
+
+    result
+}
+
+async fn spdm_responder_rebind_new_inner(
+    spdm_responder_ex: &mut ResponderContextEx<'_>,
+) -> Result<(), SpdmStatus> {
     let spdm_responder = &mut spdm_responder_ex.responder_context;
     let mut writer = Writer::init(&mut spdm_responder.common.app_context_data_buffer);
 
@@ -94,8 +108,5 @@ pub async fn spdm_responder_rebind_new<'a>(
         .encode(&mut writer)
         .map_err(|_| SPDM_STATUS_BUFFER_FULL)?;
 
-    Box::pin(rsp_handle_message(spdm_responder)).await?;
-    spdm_responder.common.app_context_data_buffer.zeroize();
-
-    Ok(())
+    Box::pin(rsp_handle_message(spdm_responder)).await
 }

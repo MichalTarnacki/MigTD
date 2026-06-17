@@ -94,11 +94,25 @@ lazy_static! {
     pub static ref REQUESTS: Mutex<BTreeSet<u64>> = Mutex::new(BTreeSet::new());
 }
 
+#[repr(C)]
 #[derive(Default)]
 pub struct ExchangeInformation {
+    pub key: MigrationSessionKey,
     pub min_ver: u16,
     pub max_ver: u16,
-    pub key: MigrationSessionKey,
+    // Explicit zeroed padding field.
+    pub reserved: [u8; 4],
+}
+
+impl ExchangeInformation {
+    fn validate(&self) -> Result<()> {
+        if self.reserved != [0; 4] {
+            log::error!("ExchangeInformation::validate: reserved field must be zero\n");
+            return Err(MigrationResult::InvalidParameter);
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(not(feature = "spdm_attestation"))]
@@ -863,6 +877,7 @@ async fn migration_src_exchange_msk(
         log::error!(migration_request_id = info.mig_info.mig_request_id; "exchange_msk(): Incorrect ExchangeInformation size Size - Expected: {} Actual: {}\n", size_of::<ExchangeInformation>(), size);
         return Err(MigrationResult::NetworkError);
     }
+    remote_information.validate()?;
     shutdown_transport(ratls_client.transport_mut(), info.mig_info.mig_request_id).await?;
     Ok(())
 }
@@ -924,6 +939,7 @@ async fn migration_dst_exchange_msk(
         log::error!(migration_request_id = info.mig_info.mig_request_id; "exchange_msk(): Incorrect ExchangeInformation size. Size - Expected: {} Actual: {}\n", size_of::<ExchangeInformation>(), size);
         return Err(MigrationResult::NetworkError);
     }
+    remote_information.validate()?;
     shutdown_transport(ratls_server.transport_mut(), info.mig_info.mig_request_id).await?;
     Ok(())
 }
@@ -1293,6 +1309,19 @@ mod test {
     use crate::migration::{session::cal_mig_version, MigrationResult};
 
     use super::ExchangeInformation;
+
+    #[test]
+    fn test_exchange_information_validate_rejects_non_zero_reserved() {
+        let mut info = ExchangeInformation::default();
+
+        assert!(info.validate().is_ok());
+
+        info.reserved = [1, 0, 0, 0];
+        assert!(matches!(
+            info.validate(),
+            Err(MigrationResult::InvalidParameter)
+        ));
+    }
 
     #[test]
     fn test_cal_mig_version() {
