@@ -33,7 +33,7 @@ jobs:
             test-type: "skip-ra"
             install-jq: 'false'
             timeout-seconds: 300
-            test-command: "./migtdemu.sh --skip-ra --both --no-sudo --log-level info"
+            test-command: "./migtdemu.sh --skip-ra --debug --both --no-sudo --log-level info"
             artifact-name: "skip-ra-test-logs"
             
           - test-name: "Policy v2 with Mock Report"
@@ -54,7 +54,7 @@ jobs:
             test-type: "rebind-skip-ra"
             install-jq: 'true'
             timeout-seconds: 300
-            test-command: "./migtdemu.sh --operation rebind-prepare --policy-file ./config/AzCVMEmu/policy_v2_signed.json --policy-issuer-chain-file ./config/AzCVMEmu/policy_issuer_chain.pem --skip-ra --both --no-sudo --log-level info"
+            test-command: "./migtdemu.sh --operation rebind-prepare --policy-file ./config/AzCVMEmu/policy_v2_signed.json --policy-issuer-chain-file ./config/AzCVMEmu/policy_issuer_chain.pem --skip-ra --debug --both --no-sudo --log-level info"
             artifact-name: "rebind-skip-ra-test-logs"
 
           - test-name: "Rebind Prepare (Mock Report)"
@@ -68,7 +68,7 @@ jobs:
             test-type: "spdm-skip-ra"
             install-jq: 'false'
             timeout-seconds: 300
-            test-command: "./migtdemu.sh --skip-ra --features spdm_attestation --both --no-sudo --log-level info"
+            test-command: "./migtdemu.sh --skip-ra --debug --features spdm_attestation --both --no-sudo --log-level info"
             artifact-name: "spdm-skip-ra-test-logs"
 
           - test-name: "SPDM Policy v2 with Mock Report"
@@ -82,7 +82,7 @@ jobs:
             test-type: "spdm-rebind-skip-ra"
             install-jq: 'true'
             timeout-seconds: 300
-            test-command: "./migtdemu.sh --operation rebind-prepare --policy-file ./config/AzCVMEmu/policy_v2_signed.json --policy-issuer-chain-file ./config/AzCVMEmu/policy_issuer_chain.pem --skip-ra --features spdm_attestation --both --no-sudo --log-level info"
+            test-command: "./migtdemu.sh --operation rebind-prepare --policy-file ./config/AzCVMEmu/policy_v2_signed.json --policy-issuer-chain-file ./config/AzCVMEmu/policy_issuer_chain.pem --skip-ra --debug --features spdm_attestation --both --no-sudo --log-level info"
             artifact-name: "spdm-rebind-skip-ra-test-logs"
 
           - test-name: "Mock Quote Retry"
@@ -148,27 +148,27 @@ jobs:
         if: matrix.test-type == 'skip-ra'
         run: |
           echo "Building MigTD with AzCVMEmu and test features for emulation testing..."
-          cargo build --release --features "AzCVMEmu,test_disable_ra_and_accept_all" --no-default-features
+          cargo build --features "AzCVMEmu,test_disable_ra_and_accept_all" --no-default-features
 
       - name: Build MigTD for rebind skip-ra test
         if: matrix.test-type == 'rebind-skip-ra'
         run: |
           echo "Building MigTD with AzCVMEmu, policy_v2, and skip-RA features for rebind testing..."
-          cargo build --release --features "AzCVMEmu,policy_v2,test_disable_ra_and_accept_all" --no-default-features
+          cargo build --features "AzCVMEmu,policy_v2,test_disable_ra_and_accept_all" --no-default-features
 
       - name: Build MigTD for SPDM skip-ra test
         if: matrix.test-type == 'spdm-skip-ra'
         run: |
           echo "Building MigTD with AzCVMEmu, SPDM attestation, and skip-RA features..."
           export SPDM_CONFIG="$(pwd)/config/spdm_config.json"
-          cargo build --release --features "AzCVMEmu,test_disable_ra_and_accept_all,spdm_attestation" --no-default-features
+          cargo build --features "AzCVMEmu,test_disable_ra_and_accept_all,spdm_attestation" --no-default-features
 
       - name: Build MigTD for SPDM rebind skip-ra test
         if: matrix.test-type == 'spdm-rebind-skip-ra'
         run: |
           echo "Building MigTD with AzCVMEmu, SPDM attestation, policy_v2, and skip-RA features..."
           export SPDM_CONFIG="$(pwd)/config/spdm_config.json"
-          cargo build --release --features "AzCVMEmu,policy_v2,test_disable_ra_and_accept_all,spdm_attestation" --no-default-features
+          cargo build --features "AzCVMEmu,policy_v2,test_disable_ra_and_accept_all,spdm_attestation" --no-default-features
 
       - name: Verify emulation script
         if: matrix.test-type == 'skip-ra' || matrix.test-type == 'rebind-skip-ra' || matrix.test-type == 'spdm-skip-ra' || matrix.test-type == 'spdm-rebind-skip-ra'
@@ -177,9 +177,9 @@ jobs:
             echo "Error: migtdemu.sh not found"
             exit 1
           fi
-          
-          if [[ ! -f "./target/release/migtd" ]]; then
-            echo "Error: migtd binary not found after build"
+
+          if [[ ! -f "./target/debug/migtd" ]]; then
+            echo "Error: debug migtd binary not found after build"
             exit 1
           fi
           echo "Emulation script and binary are ready"

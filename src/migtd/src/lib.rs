@@ -16,6 +16,17 @@
 ))]
 compile_error!("AzCVMEmu only supports vmcall-raw transport. Disable virtio-serial/vmcall-vsock/virtio-vsock when enabling AzCVMEmu.");
 
+// `use-mock-quote` bypasses RA-TLS REPORTDATA<->pubkey binding.
+// It is test-only and must never ship in release builds.
+#[cfg(all(feature = "use-mock-quote", not(debug_assertions)))]
+compile_error!("`use-mock-quote` bypasses RA-TLS channel binding and is test-only; it must not be enabled in a release build.");
+
+// `test_disable_ra_and_accept_all` compiles accept-all RA-TLS verifiers.
+// This violates Design Guide §4 (mutual authentication), so keep it test-only.
+// Allow only dev profile builds; fail release builds loudly.
+#[cfg(all(feature = "test_disable_ra_and_accept_all", not(debug_assertions)))]
+compile_error!("`test_disable_ra_and_accept_all` disables remote attestation (accept-all RA-TLS), violating Design Guide §4 mutual authentication; it is test-only and must not be enabled in a release build. Build the test image with the dev profile (`cargo image --debug`).");
+
 #[cfg_attr(feature = "main", macro_use)]
 extern crate alloc;
 
