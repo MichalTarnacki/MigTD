@@ -575,12 +575,30 @@ mod v2 {
         let root_ca_crl_num = get_crl_number(collaterals.root_ca_crl.as_bytes())
             .map_err(|_| PolicyError::InvalidCollateral)?;
 
+        // Raw platform TCB SVN component arrays from the quote supplemental data.
+        // These feed the platform security-version floor (mirrors the v1 platform
+        // check). suppl_data length was validated to be >= REPORT_DATA_SIZE by
+        // get_tcb_date_and_status_from_suppl_data above, so these ranges are in bounds.
+        let tdx_tcb_components = suppl_data
+            .get(Report::R_PLATFORM_TDX_TCB_COMPONENTS)
+            .and_then(|s| s.try_into().ok());
+        let sgx_tcb_components = suppl_data
+            .get(Report::R_PLATFORM_SGX_TCB_COMPONENTS)
+            .and_then(|s| s.try_into().ok());
+        let pce_svn = suppl_data
+            .get(Report::R_PLATFORM_PCE_SVN)
+            .and_then(|s| s.try_into().ok())
+            .map(u16::from_le_bytes);
+
         Ok(PolicyEvaluationInfo {
             tee_tcb_svn: None,
             tcb_date: Some(tcb_date.to_string()),
             tcb_status: Some(tcb_status.as_str().to_string()),
             tcb_evaluation_number: Some(tcb_evaluation_number),
             fmspc: Some(fmspc),
+            tdx_tcb_components,
+            sgx_tcb_components,
+            pce_svn,
             migtd_isvsvn: migtd_svn,
             migtd_tcb_date: migtd_tcb.map(|tcb| tcb.tcb_date.clone()),
             migtd_tcb_status: migtd_tcb.map(|tcb| tcb.tcb_status.clone()),
@@ -611,6 +629,9 @@ mod v2 {
             tcb_status: None,
             tcb_evaluation_number: None,
             fmspc: None,
+            tdx_tcb_components: None,
+            sgx_tcb_components: None,
+            pce_svn: None,
             migtd_isvsvn: migtd_svn,
             migtd_tcb_date: migtd_tcb.map(|tcb| tcb.tcb_date.clone()),
             migtd_tcb_status: migtd_tcb.map(|tcb| tcb.tcb_status.clone()),
