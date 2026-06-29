@@ -192,12 +192,20 @@ async fn vmcall_service_migtd_send(
             return Poll::Pending;
         }
 
+        // The VMM controls the response length; reject any response whose data
+        // section is too short to hold the fields parsed below, otherwise the
+        // indexing into `reply.data()` would panic.
+        let reply_data = reply.data();
+        if reply_data.len() < 12 {
+            return Poll::Ready(Err(VsockTransportError::InvalidParameter));
+        }
+
         // Do the sanity check
         if reply.guid() != VMCALL_SERVICE_MIGTD_GUID.as_bytes()
             || reply.status() != 0
-            || reply.data()[0] != CURRENT_VERSION
-            || reply.data()[1] != COMMAND_SEND
-            || u64::from_le_bytes(reply.data()[4..12].try_into().unwrap()) != mid
+            || reply_data[0] != CURRENT_VERSION
+            || reply_data[1] != COMMAND_SEND
+            || u64::from_le_bytes(reply_data[4..12].try_into().unwrap()) != mid
         {
             return Poll::Ready(Err(VsockTransportError::InvalidParameter));
         }
@@ -230,17 +238,25 @@ async fn vmcall_service_migtd_receive(
             return Poll::Pending;
         }
 
+        // The VMM controls the response length; reject any response whose data
+        // section is too short to hold the fields parsed below, otherwise the
+        // indexing into `reply.data()` would panic.
+        let reply_data = reply.data();
+        if reply_data.len() < 12 {
+            return Poll::Ready(Err(VsockTransportError::InvalidParameter));
+        }
+
         // Do the sanity check
         if reply.guid() != VMCALL_SERVICE_MIGTD_GUID.as_bytes()
             || reply.status() != 0
-            || reply.data()[0] != CURRENT_VERSION
-            || reply.data()[1] != COMMAND_RECV
-            || u64::from_le_bytes(reply.data()[4..12].try_into().unwrap()) != mid
+            || reply_data[0] != CURRENT_VERSION
+            || reply_data[1] != COMMAND_RECV
+            || u64::from_le_bytes(reply_data[4..12].try_into().unwrap()) != mid
         {
             return Poll::Ready(Err(VsockTransportError::InvalidParameter));
         }
 
-        recv_packet(&reply.data()[12..])?;
+        recv_packet(&reply_data[12..])?;
         Poll::Ready(pop_stream_queues(addrs).ok_or(VsockTransportError::InvalidVsockPacket))
     })
     .await

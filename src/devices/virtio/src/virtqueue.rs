@@ -47,6 +47,20 @@ pub struct VirtQueue {
     free_head: u16,
     avail_idx: u16,
     last_used_idx: u16,
+
+    /// Private shadow of the descriptor `next` links. This is the authoritative
+    /// source for free-list traversal and chain recycling; the host-writable
+    /// `desc[].next` field in shared DMA is never trusted to drive guest-side
+    /// accounting.
+    desc_next: [u16; MAX_QUEUE_SIZE],
+    /// Private shadow of each descriptor's direction (true = device-writable,
+    /// i.e. host-to-guest). Recorded at `add` time so recycling does not rely on
+    /// the host-writable `desc[].flags`.
+    desc_write: [bool; MAX_QUEUE_SIZE],
+    /// Number of descriptors in the in-flight chain headed by each index. A
+    /// value of 0 means the index is not the head of an in-flight chain, so a
+    /// host-reported used id that is not a real chain head is rejected.
+    chain_len: [u16; MAX_QUEUE_SIZE],
 }
 
 impl VirtQueue {
@@ -82,8 +96,10 @@ impl VirtQueue {
             unsafe { &mut *((dma_addr as usize + layout.used_offset) as *mut UsedRing) };
 
         // link descriptors together
+        let mut desc_next = [0u16; MAX_QUEUE_SIZE];
         for i in 0..(queue_size - 1) {
             desc[i as usize].next.write(i + 1);
+            desc_next[i as usize] = i + 1;
         }
 
         Ok(VirtQueue {
@@ -96,6 +112,9 @@ impl VirtQueue {
             free_head: 0,
             avail_idx: 0,
             last_used_idx: 0,
+            desc_next,
+            desc_write: [false; MAX_QUEUE_SIZE],
+            chain_len: [0; MAX_QUEUE_SIZE],
         })
     }
 
@@ -129,7 +148,11 @@ impl VirtQueue {
         flags.remove(DescFlags::NEXT);
         desc.flags.write(flags);
 
-        self.num_used += (g2h.len() + h2g.len()) as u16;
+        let chain_len = (g2h.len() + h2g.len()) as u16;
+        self.num_used += chain_len;
+        // Record the submitted chain length privately so recycling validates the
+        // host-reported used id against a chain we actually built.
+        self.chain_len[head as usize] = chain_len;
 
         let avail_slot = self.avail_idx & (self.queue_size - 1);
         self.avail
@@ -160,18 +183,20 @@ impl VirtQueue {
     }
 
     fn add_descriptor(&mut self, buf: &VirtqueueBuf, flag: DescFlags) -> Result<u16> {
+        let index = self.free_head;
         let desc = self
             .desc
-            .get_mut(self.free_head as usize)
+            .get_mut(index as usize)
             .ok_or(VirtioError::InvalidDescriptorIndex)?;
         desc.set_buf(buf);
         desc.flags.write(flag);
 
-        // Update the free head
-        let last = self.free_head;
-        self.free_head = desc.next.read();
+        // Advance the free head using the private shadow link instead of the
+        // host-writable `desc.next`, and record the buffer direction privately.
+        self.free_head = self.desc_next[index as usize];
+        self.desc_write[index as usize] = flag.contains(DescFlags::WRITE);
 
-        Ok(last)
+        Ok(index)
     }
 
     /// Recycle descriptors in the list specified by head.
@@ -179,41 +204,60 @@ impl VirtQueue {
     /// This will push all linked descriptors at the front of the free list.
     fn recycle_descriptors(
         &mut self,
-        mut head: u16,
+        head: u16,
         g2h: &mut Vec<VirtqueueBuf>,
         h2g: &mut Vec<VirtqueueBuf>,
     ) -> Result<()> {
-        let origin_free_head = self.free_head;
-        self.free_head = head;
+        // Validate, against private state, that `head` (reported by the host via
+        // the used ring) is the head of a chain we actually submitted. The walk
+        // below is driven entirely by the private shadow, never by the
+        // host-writable `desc.next`/`desc.flags`, so the host cannot redirect it
+        // to never-submitted slots or leak in-flight descriptors.
+        let len = self
+            .chain_len
+            .get(head as usize)
+            .copied()
+            .ok_or(VirtioError::InvalidDescriptorIndex)?;
+        if len == 0 || len > self.num_used {
+            return Err(VirtioError::InvalidDescriptor);
+        }
 
-        while self.num_used > 0 {
+        let origin_free_head = self.free_head;
+        let mut cur = head;
+        for i in 0..len {
+            let index = cur as usize;
+            let next = self.desc_next[index];
+            let is_write = self.desc_write[index];
+            let is_last = i + 1 == len;
+
             let desc = self
                 .desc
-                .get_mut(head as usize)
+                .get_mut(index)
                 .ok_or(VirtioError::InvalidDescriptorIndex)?;
-
-            let flags = desc.flags.read();
-            self.num_used -= 1;
-
             let addr = desc.addr.read();
-            let len = desc.len.read();
-
-            if flags.contains(DescFlags::WRITE) {
-                h2g.push(VirtqueueBuf::new(addr, len));
-            } else {
-                g2h.push(VirtqueueBuf::new(addr, len));
-            }
-
-            if flags.contains(DescFlags::NEXT) {
-                if self.num_used == 0 {
-                    return Err(VirtioError::InvalidDescriptor);
-                }
-                head = desc.next.read();
-            } else {
+            let buf_len = desc.len.read();
+            if is_last {
+                // Relink the tail of the recycled chain to the previous free
+                // head in the shared table so the device still observes a
+                // consistent free list.
                 desc.next.write(origin_free_head);
-                break;
             }
+
+            if is_write {
+                h2g.push(VirtqueueBuf::new(addr, buf_len));
+            } else {
+                g2h.push(VirtqueueBuf::new(addr, buf_len));
+            }
+
+            if is_last {
+                self.desc_next[index] = origin_free_head;
+            }
+            cur = next;
         }
+
+        self.free_head = head;
+        self.num_used -= len;
+        self.chain_len[head as usize] = 0;
 
         Ok(())
     }

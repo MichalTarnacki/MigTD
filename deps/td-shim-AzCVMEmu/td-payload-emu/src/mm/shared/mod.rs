@@ -10,6 +10,7 @@ const PAGE_SIZE: usize = 0x1000;
 
 pub struct SharedMemory {
     buf: Vec<u8>,
+    shadow: Vec<u8>,
 }
 
 impl SharedMemory {
@@ -21,6 +22,7 @@ impl SharedMemory {
         let size = pages.checked_mul(4096)?;
         Some(Self {
             buf: Vec::from_iter(core::iter::repeat(0u8).take(size)),
+            shadow: Vec::new(),
         })
     }
 
@@ -34,9 +36,11 @@ impl SharedMemory {
     }
 
     pub fn copy_to_private_shadow(&mut self) -> Option<&[u8]> {
-        // In emulation mode, just return the buffer directly since we're not dealing with
-        // actual shared/private memory conversion like in real TDX
-        Some(&self.buf)
+        // Copy into a separate shadow buffer so the returned slice is an immutable
+        // snapshot, matching the real td-payload shared->private memcpy semantics.
+        self.shadow.clear();
+        self.shadow.extend_from_slice(&self.buf);
+        Some(&self.shadow)
     }
 }
 
