@@ -498,7 +498,7 @@ pub(crate) mod connection {
 
         // Accumulate number of used bytes
         pub fn consume(&mut self, size: usize) {
-            self.used += size;
+            self.used = core::cmp::min(self.used + size, self.inner.len());
         }
 
         // Discard the first `size` bytes
@@ -603,7 +603,16 @@ pub(crate) mod connection {
                             |out_buffer| state.encrypt(data, out_buffer),
                             map_err,
                         )?;
-                        self.transport.write(self.output.used()).await?;
+                        // Write all output bytes to transport (handle short writes)
+                        let total = self.output.used().len();
+                        let mut written = 0;
+                        while written < total {
+                            let n = self.transport.write(&self.output.used()[written..]).await?;
+                            if n == 0 {
+                                return Err(TlsConnectionError::UnexpectedState);
+                            }
+                            written += n;
+                        }
                         self.output.reset();
                         break;
                     }
@@ -818,8 +827,8 @@ pub(crate) mod connection {
                                 discard: new_discard,
                                 payload,
                             } = res?;
+                            discard += new_discard;
                             if !self.received_app_data.is_full() {
-                                discard += new_discard;
                                 self.received_app_data.append(payload.to_vec());
                             }
                         }
@@ -869,7 +878,16 @@ pub(crate) mod connection {
                             |out_buffer| state.encrypt(data, out_buffer),
                             map_err,
                         )?;
-                        self.transport.write(self.output.used()).await?;
+                        // Write all output bytes to transport (handle short writes)
+                        let total = self.output.used().len();
+                        let mut written = 0;
+                        while written < total {
+                            let n = self.transport.write(&self.output.used()[written..]).await?;
+                            if n == 0 {
+                                return Err(TlsConnectionError::UnexpectedState);
+                            }
+                            written += n;
+                        }
                         self.output.reset();
                         break;
                     }

@@ -48,7 +48,7 @@ impl VmcallRaw {
     }
 
     pub async fn connect(&mut self) -> Result {
-        let _ = vmcall_raw_transport_init();
+        vmcall_raw_transport_init()?;
         VMCALL_MIG_CONTEXT_FLAGS
             .lock()
             .insert(self.addr.transport_context(), AtomicBool::new(false));

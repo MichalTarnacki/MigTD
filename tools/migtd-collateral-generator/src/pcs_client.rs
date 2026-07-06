@@ -206,6 +206,11 @@ fn remove_header_case_insensitive(
 const INITIAL_RETRY_DELAY_SECS: u64 = 10;
 /// Maximum retry delay in seconds. Once the next delay would exceed this, error out.
 const MAX_RETRY_DELAY_SECS: u64 = 180;
+/// Maximum accepted size (in bytes) for a single PCS response body. PCS
+/// collateral (root CA, CRLs, QE identity, TCB info, FMSPC list) is at most a
+/// few tens of KB; this generous cap prevents a compromised or misbehaving
+/// endpoint from exhausting build-host memory with an unbounded response.
+const MAX_PCS_RESPONSE_SIZE: usize = 16 * 1024 * 1024;
 
 pub async fn fetch_data_from_url(url: &str) -> Result<PcsResponse> {
     let client = Client::new();
@@ -234,7 +239,7 @@ pub async fn fetch_data_from_url(url: &str) -> Result<PcsResponse> {
 }
 
 async fn send_request(client: &Client, url: &str) -> Result<PcsResponse> {
-    let response = client.get(url).send().await?;
+    let mut response = client.get(url).send().await?;
     let status = response.status().as_u16() as u32;
 
     // Treat server errors (5xx), 429 (Too Many Requests) and 408 (Request
@@ -256,7 +261,20 @@ async fn send_request(client: &Client, url: &str) -> Result<PcsResponse> {
         );
     }
 
-    let data = response.bytes().await?.to_vec();
+    // Stream the body with a hard cap instead of buffering an unbounded
+    // `bytes()` so a compromised or misbehaving endpoint cannot exhaust
+    // build-host memory with an oversized response.
+    let mut data = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if data.len() + chunk.len() > MAX_PCS_RESPONSE_SIZE {
+            return Err(anyhow!(
+                "Response body from {} exceeds {}-byte cap",
+                url,
+                MAX_PCS_RESPONSE_SIZE
+            ));
+        }
+        data.extend_from_slice(&chunk);
+    }
 
     Ok(PcsResponse {
         response_code: status,

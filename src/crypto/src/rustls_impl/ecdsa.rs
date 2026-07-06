@@ -115,7 +115,8 @@ pub fn ecdsa_verify_with_raw_public_key(
 pub fn ecdsa_sign(pkcs8: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     let rand = SystemRandom::new();
     let ecdsa_key =
-        EcdsaKeyPair::from_pkcs8(&signature::ECDSA_P384_SHA384_ASN1_SIGNING, pkcs8, &rand).unwrap();
+        EcdsaKeyPair::from_pkcs8(&signature::ECDSA_P384_SHA384_ASN1_SIGNING, pkcs8, &rand)
+            .map_err(|_| Error::EcdsaSign)?;
 
     ecdsa_key
         .sign(&rand, data)

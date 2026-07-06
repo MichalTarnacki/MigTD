@@ -193,7 +193,8 @@ async fn vmcall_service_migtd_send(
         }
 
         // Do the sanity check
-        if reply.guid() != VMCALL_SERVICE_MIGTD_GUID.as_bytes()
+        if reply.data().len() < 12
+            || reply.guid() != VMCALL_SERVICE_MIGTD_GUID.as_bytes()
             || reply.status() != 0
             || reply.data()[0] != CURRENT_VERSION
             || reply.data()[1] != COMMAND_SEND
@@ -231,7 +232,8 @@ async fn vmcall_service_migtd_receive(
         }
 
         // Do the sanity check
-        if reply.guid() != VMCALL_SERVICE_MIGTD_GUID.as_bytes()
+        if reply.data().len() < 12
+            || reply.guid() != VMCALL_SERVICE_MIGTD_GUID.as_bytes()
             || reply.status() != 0
             || reply.data()[0] != CURRENT_VERSION
             || reply.data()[1] != COMMAND_RECV
