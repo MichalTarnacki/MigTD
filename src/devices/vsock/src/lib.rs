@@ -13,6 +13,8 @@ use stream::VsockStream;
 pub mod protocol;
 pub mod stream;
 pub mod transport;
+#[allow(dead_code)]
+pub(crate) mod virtio_dump;
 
 use transport::*;
 
