@@ -33,6 +33,12 @@ impl MemoryRegion {
     pub fn new(base: u64, length: u64) -> Option<MemoryRegion> {
         let _ = base.checked_add(length)?;
 
+        // Reject host-controlled BARs that hit private DRAM or the low 1 MiB.
+        #[cfg(not(feature = "fuzz"))]
+        if pci::region_overlaps_private_dram(base, length) {
+            return None;
+        }
+
         Some(MemoryRegion { base, length })
     }
 
