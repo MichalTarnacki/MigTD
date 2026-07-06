@@ -439,12 +439,18 @@ impl PciDevice {
                     0 => {
                         let size = self.get_bar_size(current_bar_offset)?;
 
+                        // Only program a BAR whose size we could probe. A malicious
+                        // host emulating PCI config space can return a malformed
+                        // sizing value (size == 0); never fall back to the raw
+                        // host-chosen BAR value, which would place the device MMIO
+                        // region at an unvalidated address outside the allocated
+                        // MMIO window. Treat such a BAR as absent (fail closed).
                         let addr = if size > 0 {
                             let addr = alloc_mmio32(size)?;
                             self.set_bar_addr(current_bar_offset, addr)?;
                             addr
                         } else {
-                            bar
+                            0
                         };
 
                         self.bars[current_bar].bar_type = PciBarType::MemorySpace32;
@@ -459,13 +465,15 @@ impl PciDevice {
                             size = (self.get_bar_size(current_bar_offset + 4)? as u64) << 32;
                         }
 
+                        // See the 32-bit case above: fail closed instead of
+                        // trusting the raw host-chosen BAR value when sizing fails.
                         let addr = if size > 0 {
                             let addr = alloc_mmio64(size)?;
                             self.set_bar_addr(current_bar_offset, addr as u32)?;
                             self.set_bar_addr(current_bar_offset + 4, (addr >> 32) as u32)?;
                             addr
                         } else {
-                            bar as u64
+                            0
                         };
 
                         self.bars[current_bar].address = addr & PCI_MEM64_BASE_ADDRESS_MASK;
@@ -517,12 +525,15 @@ impl PciDevice {
                     0 => {
                         let size = self.read_u32(current_bar_offset)?;
 
+                        // Fail closed: never fall back to the raw host-chosen
+                        // BAR value when sizing yields 0 (see the production
+                        // `init` for the rationale).
                         let addr = if size > 0 {
                             let addr = alloc_mmio32(size)?;
                             self.set_bar_addr(current_bar_offset, addr)?;
                             addr
                         } else {
-                            bar
+                            0
                         };
 
                         self.bars[current_bar].bar_type = PciBarType::MemorySpace32;
@@ -532,14 +543,14 @@ impl PciDevice {
                     2 => {
                         self.bars[current_bar].bar_type = PciBarType::MemorySpace64;
 
-                        let mut size = self.read_u64(current_bar_offset)?;
+                        let size = self.read_u64(current_bar_offset)?;
                         let addr = if size > 0 {
                             let addr = alloc_mmio64(size)?;
                             self.set_bar_addr(current_bar_offset, addr as u32)?;
                             self.set_bar_addr(current_bar_offset + 4, (addr >> 32) as u32)?;
                             addr
                         } else {
-                            bar as u64
+                            0
                         };
 
                         self.bars[current_bar].address = addr & PCI_MEM64_BASE_ADDRESS_MASK;
@@ -575,7 +586,11 @@ impl PciDevice {
         Ok(if size == 0 {
             size
         } else {
-            !(size & 0xFFFF_FFF0) + 1
+            // `wrapping_add` avoids an overflow panic in debug builds when the
+            // host returns a malformed sizing value whose low bits are clear
+            // (e.g. 0x1): `!(0) + 1` would otherwise overflow. The wrapped
+            // result is 0, which is treated as "no BAR" by the caller.
+            (!(size & 0xFFFF_FFF0)).wrapping_add(1)
         })
     }
 
