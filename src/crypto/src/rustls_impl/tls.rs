@@ -393,6 +393,7 @@ pub(crate) mod connection {
         },
         ClientConfig, ServerConfig,
     };
+    use zeroize::Zeroize;
 
     pub const PAGE_SIZE: usize = 0x1000;
     pub const TLS_BUFFER_SIZE: usize = 16 * PAGE_SIZE;
@@ -493,6 +494,8 @@ pub(crate) mod connection {
 
         // Reset the used
         pub fn reset(&mut self) {
+            // Zeroize plaintext before clearing the buffer.
+            self.inner[..self.used].zeroize();
             self.used = 0;
         }
 
@@ -503,8 +506,18 @@ pub(crate) mod connection {
 
         // Discard the first `size` bytes
         pub fn discard(&mut self, size: usize) {
+            let old_used = self.used;
             self.inner.copy_within(size..self.used, 0);
             self.used -= size;
+            // Wipe the vacated tail.
+            self.inner[self.used..old_used].zeroize();
+        }
+    }
+
+    impl Drop for TlsBuffer {
+        fn drop(&mut self) {
+            // Zeroize the backing allocation on drop.
+            self.inner.zeroize();
         }
     }
 
@@ -762,12 +775,25 @@ pub(crate) mod connection {
         fn consume(&mut self, mut used: usize) {
             while let Some(mut buf) = self.chunks.pop_front() {
                 if used < buf.len() {
+                    // Wipe the consumed prefix.
+                    buf[..used].zeroize();
                     buf.drain(..used);
                     self.chunks.push_front(buf);
                     break;
                 } else {
                     used -= buf.len();
+                    // Zeroize the fully consumed chunk.
+                    buf.zeroize();
                 }
+            }
+        }
+    }
+
+    impl Drop for ChunkVecBuffer {
+        fn drop(&mut self) {
+            // Zeroize unread buffered plaintext on drop.
+            for chunk in &mut self.chunks {
+                chunk.zeroize();
             }
         }
     }
