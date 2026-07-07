@@ -56,9 +56,16 @@ impl MemoryRegion {
 
     /// Expose a section of the memory region as a slice
     pub fn as_slice<T>(&mut self, offset: u64, length: u64) -> Result<&[T], MemoryRegionError> {
+        let byte_length =
+            length
+                .checked_mul(core::mem::size_of::<T>() as u64)
+                .ok_or(MemoryRegionError {
+                    region: *self,
+                    offset,
+                })?;
         if self.base.checked_add(offset).is_none()
             || offset
-                .checked_add(length)
+                .checked_add(byte_length)
                 .and_then(|end| if end > self.length { None } else { Some(end) })
                 .is_none()
         {
@@ -79,9 +86,16 @@ impl MemoryRegion {
         offset: u64,
         length: u64,
     ) -> Result<&mut [T], MemoryRegionError> {
+        let byte_length =
+            length
+                .checked_mul(core::mem::size_of::<T>() as u64)
+                .ok_or(MemoryRegionError {
+                    region: *self,
+                    offset,
+                })?;
         if self.base.checked_add(offset).is_none()
             || offset
-                .checked_add(length)
+                .checked_add(byte_length)
                 .and_then(|end| if end > self.length { None } else { Some(end) })
                 .is_none()
         {
