@@ -26,6 +26,8 @@ const COMMAND_RECV: u8 = 4;
 const MAX_VSOCK_MTU: usize = 0x1000 * 16;
 const VMCALL_COMMON_HEADER_LEN: usize = 36;
 const VMCALL_STATUS_RESERVED: u32 = 0xffff_ffff;
+// Reply data layout: [0] version, [1] command, [2..4] reserved, [4..12] MigRequestId
+const VMCALL_REPLY_DATA_HEADER_LEN: usize = 12;
 const VMCALL_VECTOR: u8 = 0x52;
 pub(crate) const MAX_VSOCK_PKT_DATA_LEN: usize =
     MAX_VSOCK_MTU - VMCALL_COMMON_HEADER_LEN - HEADER_LEN;
@@ -193,11 +195,16 @@ async fn vmcall_service_migtd_send(
         }
 
         // Do the sanity check
-        if reply.guid() != VMCALL_SERVICE_MIGTD_GUID.as_bytes()
+        if reply.data().len() < VMCALL_REPLY_DATA_HEADER_LEN
+            || reply.guid() != VMCALL_SERVICE_MIGTD_GUID.as_bytes()
             || reply.status() != 0
             || reply.data()[0] != CURRENT_VERSION
             || reply.data()[1] != COMMAND_SEND
-            || u64::from_le_bytes(reply.data()[4..12].try_into().unwrap()) != mid
+            || u64::from_le_bytes(
+                reply.data()[4..VMCALL_REPLY_DATA_HEADER_LEN]
+                    .try_into()
+                    .unwrap(),
+            ) != mid
         {
             return Poll::Ready(Err(VsockTransportError::InvalidParameter));
         }
@@ -231,16 +238,21 @@ async fn vmcall_service_migtd_receive(
         }
 
         // Do the sanity check
-        if reply.guid() != VMCALL_SERVICE_MIGTD_GUID.as_bytes()
+        if reply.data().len() < VMCALL_REPLY_DATA_HEADER_LEN
+            || reply.guid() != VMCALL_SERVICE_MIGTD_GUID.as_bytes()
             || reply.status() != 0
             || reply.data()[0] != CURRENT_VERSION
             || reply.data()[1] != COMMAND_RECV
-            || u64::from_le_bytes(reply.data()[4..12].try_into().unwrap()) != mid
+            || u64::from_le_bytes(
+                reply.data()[4..VMCALL_REPLY_DATA_HEADER_LEN]
+                    .try_into()
+                    .unwrap(),
+            ) != mid
         {
             return Poll::Ready(Err(VsockTransportError::InvalidParameter));
         }
 
-        recv_packet(&reply.data()[12..])?;
+        recv_packet(&reply.data()[VMCALL_REPLY_DATA_HEADER_LEN..])?;
         Poll::Ready(pop_stream_queues(addrs).ok_or(VsockTransportError::InvalidVsockPacket))
     })
     .await
