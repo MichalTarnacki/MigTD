@@ -80,6 +80,11 @@ pub fn get_quote_igvm(td_report: &[u8]) -> Result<Vec<u8>, Error> {
 
     // send the request to VMM via ghci
     let get_quote_blob_ptr = get_quote_blob.as_mut_ptr() as *mut c_void;
+    // Verify alignment for ServtdTdxQuoteHdr access
+    debug_assert!(
+        (get_quote_blob_ptr as usize) % core::mem::align_of::<ServtdTdxQuoteHdr>() == 0,
+        "get_quote_blob buffer not properly aligned for ServtdTdxQuoteHdr"
+    );
     let servtd_get_quote_ret =
         unsafe { servtd_get_quote(get_quote_blob_ptr, SERVTD_REQ_BUF_SIZE as u64) };
 
