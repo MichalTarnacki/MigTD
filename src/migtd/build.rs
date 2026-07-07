@@ -5,6 +5,10 @@
 fn main() {
     println!("cargo:rustc-link-arg=-defsym=__ImageBase=0");
 
+    // `test_disable_ra_and_accept_all` is test-only.
+    // The release fence is enforced in `src/lib.rs` via
+    // `#[cfg(all(feature = ..., not(debug_assertions)))] compile_error!`.
+
     // Only add attestation library linking for AzCVMEmu if not in test mode
     #[cfg(all(feature = "AzCVMEmu", not(feature = "test_disable_ra_and_accept_all")))]
     {

@@ -124,8 +124,9 @@ cargo image --no-default-features --features stack-guard,vmcall-raw
 
 To generate IGVM format using vmcall-raw for the guest-host communication with logging enabled and support APIC oneshot timer if TSC deadline is unavailable:
 ```
-cargo image --no-default-features --features vmcall-raw,stack-guard,main,test_disable_ra_and_accept_all,vmcall-interrupt,oneshot-apic --log-level info --image-format igvm
+cargo image --debug --no-default-features --features vmcall-raw,stack-guard,main,test_disable_ra_and_accept_all,vmcall-interrupt,oneshot-apic --log-level info --image-format igvm
 ```
+> Note: `test_disable_ra_and_accept_all` disables RA-TLS verification and is test-only. It is blocked in release builds; use `cargo image --debug`.
 
 ### Policy V2
 

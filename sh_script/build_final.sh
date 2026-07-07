@@ -247,7 +247,18 @@ function final_migtd() {
 }
 
 function build_migtd() {
-    cargo build -p migtd --target x86_64-unknown-none --release --no-default-features --features=${MIGTD_FEATURE}
+    if [[ ${attestation} != "on" ]]
+    then
+        # `test_disable_ra_and_accept_all` is test-only and blocked in release
+        # by `compile_error!` (see src/lib.rs). Build it in dev profile, then
+        # stage the binary under the release path expected by this pipeline.
+        cargo build -p migtd --target x86_64-unknown-none --no-default-features --features=${MIGTD_FEATURE}
+        check_file_exist "./target/x86_64-unknown-none/debug/migtd"
+        mkdir -p ./target/x86_64-unknown-none/release
+        cp ./target/x86_64-unknown-none/debug/migtd ./target/x86_64-unknown-none/release/migtd
+    else
+        cargo build -p migtd --target x86_64-unknown-none --release --no-default-features --features=${MIGTD_FEATURE}
+    fi
     check_file_exist "./target/x86_64-unknown-none/release/migtd"    
 }
 
