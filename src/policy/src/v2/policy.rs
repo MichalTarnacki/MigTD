@@ -151,6 +151,15 @@ pub struct PolicyEvaluationInfo {
     /// The FMSPC of platform
     pub fmspc: Option<[u8; 6]>,
 
+    /// The platform TDX TCB components (16-byte SVN array from the quote)
+    pub tdx_tcb_components: Option<[u8; 16]>,
+
+    /// The platform SGX TCB components (16-byte SVN array from the quote)
+    pub sgx_tcb_components: Option<[u8; 16]>,
+
+    /// The platform PCE SVN
+    pub pce_svn: Option<u16>,
+
     /// The isvsvn of the MigTD TCB
     pub migtd_isvsvn: Option<u16>,
 
@@ -498,6 +507,9 @@ impl TcbPolicy {
 #[derive(Debug, Serialize, Deserialize)]
 struct PlatformPolicy {
     fmspc: Option<PolicyProperty>,
+    sgxtcbcomponents: Option<PolicyProperty>,
+    pcesvn: Option<PolicyProperty>,
+    tdxtcbcomponents: Option<PolicyProperty>,
 }
 
 impl PlatformPolicy {
@@ -517,8 +529,58 @@ impl PlatformPolicy {
             }
         }
 
+        // Enforce the platform TCB security-version floor on the raw SVN component
+        // arrays carried in the quote, independent of the (permissive) tcbStatus
+        // string. This mirrors the v1 platform check and the design-guide table of
+        // per-component SVN comparisons; absent components fail closed.
+        if let Some(property) = &self.tdxtcbcomponents {
+            let values = components_to_u32(
+                value
+                    .tdx_tcb_components
+                    .as_ref()
+                    .ok_or(PolicyError::TcbEvaluation)?,
+            );
+            let relative = relative_reference
+                .tdx_tcb_components
+                .as_ref()
+                .map(components_to_u32);
+            if !property.evaluate_integer_list(&values, relative.as_deref())? {
+                return Err(PolicyError::TcbEvaluation);
+            }
+        }
+
+        if let Some(property) = &self.sgxtcbcomponents {
+            let values = components_to_u32(
+                value
+                    .sgx_tcb_components
+                    .as_ref()
+                    .ok_or(PolicyError::TcbEvaluation)?,
+            );
+            let relative = relative_reference
+                .sgx_tcb_components
+                .as_ref()
+                .map(components_to_u32);
+            if !property.evaluate_integer_list(&values, relative.as_deref())? {
+                return Err(PolicyError::TcbEvaluation);
+            }
+        }
+
+        if let Some(property) = &self.pcesvn {
+            let pce_svn = value.pce_svn.ok_or(PolicyError::TcbEvaluation)? as u32;
+            let relative = relative_reference.pce_svn.map(|v| v as u32);
+            if !property.evaluate_integer(pce_svn, relative)? {
+                return Err(PolicyError::TcbEvaluation);
+            }
+        }
+
         Ok(())
     }
+}
+
+/// Convert a 16-byte platform TCB component array into a `Vec<u32>` so it can be
+/// evaluated element-wise against a policy integer list.
+fn components_to_u32(components: &[u8; 16]) -> Vec<u32> {
+    components.iter().map(|b| *b as u32).collect()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -638,6 +700,35 @@ struct PolicyProperty {
     pub reference: Reference,
 }
 
+/// Returns true only for a canonical, fixed-width ISO-8601 UTC timestamp of the
+/// exact form "YYYY-MM-DDTHH:MM:SSZ" (e.g. "2025-01-01T00:00:00Z"). Lexicographic
+/// ordering of date strings is only valid under this canonical form, so callers
+/// that compare dates with `>=` must reject anything else.
+fn is_canonical_iso8601(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() != 20 {
+        return false;
+    }
+    let is_digit = |i: usize| b[i].is_ascii_digit();
+    (0..4).all(is_digit)
+        && b[4] == b'-'
+        && is_digit(5)
+        && is_digit(6)
+        && b[7] == b'-'
+        && is_digit(8)
+        && is_digit(9)
+        && b[10] == b'T'
+        && is_digit(11)
+        && is_digit(12)
+        && b[13] == b':'
+        && is_digit(14)
+        && is_digit(15)
+        && b[16] == b':'
+        && is_digit(17)
+        && is_digit(18)
+        && b[19] == b'Z'
+}
+
 impl PolicyProperty {
     pub fn evaluate_integer(
         &self,
@@ -689,7 +780,6 @@ impl PolicyProperty {
         }
     }
 
-    #[allow(unused)]
     pub fn evaluate_integer_list(
         &self,
         values: &[u32],
@@ -749,8 +839,14 @@ impl PolicyProperty {
                 match self.operation.as_str() {
                     "equal" => Ok(value == reference_value),
                     "greater-or-equal" => {
-                        // Simple lexicographical comparison works for ISO-8601 format (e.g. "2025-01-01T00:00:00Z")
-                        // This is because ISO-8601 is designed to be sortable as strings
+                        // The lexicographical comparison below is only correct when both
+                        // operands are canonical, fixed-width ISO-8601 timestamps (e.g.
+                        // "2025-01-01T00:00:00Z"). A non-canonical value such as "2024-9-1"
+                        // would sort incorrectly (byte '9' > '1'), so reject anything that is
+                        // not in the canonical form before comparing, failing closed.
+                        if !is_canonical_iso8601(value) || !is_canonical_iso8601(reference_value) {
+                            return Err(PolicyError::InvalidReference);
+                        }
                         Ok(value >= reference_value)
                     }
                     _ => Err(PolicyError::InvalidOperation),
@@ -894,6 +990,62 @@ mod test {
     }
 
     #[test]
+    fn test_platform_tcb_components() {
+        // A platform policy that enforces a per-component SVN floor on the raw
+        // tdxtcbcomponents array (the v1-equivalent platform check restored in v2).
+        let policy: PlatformPolicy = serde_json::from_str(
+            r#"{
+                "tdxtcbcomponents": {
+                    "operation": "array-greater-or-equal",
+                    "reference": [2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut value = PolicyEvaluationInfo::default();
+        let relative = PolicyEvaluationInfo::default();
+
+        // Equal components pass.
+        value.tdx_tcb_components = Some([2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert!(policy.evaluate(&value, &relative).is_ok());
+
+        // Strictly higher components pass.
+        value.tdx_tcb_components = Some([3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert!(policy.evaluate(&value, &relative).is_ok());
+
+        // A single lower component must fail (fail closed).
+        value.tdx_tcb_components = Some([1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert!(policy.evaluate(&value, &relative).is_err());
+
+        // Absent platform components must fail closed when the policy requires them.
+        value.tdx_tcb_components = None;
+        assert!(policy.evaluate(&value, &relative).is_err());
+    }
+
+    #[test]
+    fn test_platform_pcesvn() {
+        let policy: PlatformPolicy = serde_json::from_str(
+            r#"{
+                "pcesvn": { "operation": "greater-or-equal", "reference": 11 }
+            }"#,
+        )
+        .unwrap();
+
+        let mut value = PolicyEvaluationInfo::default();
+        let relative = PolicyEvaluationInfo::default();
+
+        value.pce_svn = Some(11);
+        assert!(policy.evaluate(&value, &relative).is_ok());
+        value.pce_svn = Some(12);
+        assert!(policy.evaluate(&value, &relative).is_ok());
+        value.pce_svn = Some(10);
+        assert!(policy.evaluate(&value, &relative).is_err());
+        value.pce_svn = None;
+        assert!(policy.evaluate(&value, &relative).is_err());
+    }
+
+    #[test]
     fn test_global_policy() {
         let global = include_str!("../../test/policy_v2/global.json");
         let global_policy = serde_json::from_str::<GlobalPolicy>(global).unwrap();
@@ -903,6 +1055,9 @@ mod test {
             tcb_status: Some("UpToDate".to_string()),
             tcb_evaluation_number: Some(15),
             fmspc: Some([0x10, 0xC0, 0x6F, 0x00, 0x00, 0x00]),
+            tdx_tcb_components: None,
+            sgx_tcb_components: None,
+            pce_svn: None,
             migtd_tcb_status: None,
             migtd_tcb_date: None,
             migtd_isvsvn: None,
