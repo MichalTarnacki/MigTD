@@ -18,8 +18,12 @@ pub fn get_fmspc_from_quote(quote: &[u8]) -> Result<[u8; 6], PolicyError> {
     let start_index = mid.find(PEM_CERT_BEGIN).ok_or(PolicyError::InvalidQuote)?;
     let end_index = mid[start_index..]
         .find(PEM_CERT_END)
-        .map(|i| start_index + i + PEM_CERT_END.len())
+        .and_then(|i| i.checked_add(start_index))
+        .and_then(|i| i.checked_add(PEM_CERT_END.len()))
         .ok_or(PolicyError::InvalidQuote)?;
+    if start_index >= end_index {
+        return Err(PolicyError::InvalidQuote);
+    }
 
     let pck_cert = mid[start_index..end_index].as_bytes();
     let pck_der = crypto::pem_cert_to_der(pck_cert).map_err(|_| PolicyError::InvalidQuote)?;
